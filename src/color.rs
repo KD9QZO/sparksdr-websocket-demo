@@ -20,92 +20,94 @@
 /// Colours required for a PNG file, includes the alpha channel.
 #[derive(Clone)]
 pub struct RGBAColour {
-  pub r: u8,
-  pub g: u8,
-  pub b: u8,
-  pub a: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
 }
 
 impl RGBAColour {
-  pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
-    Self { r, g, b, a }
-  }
+    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
+    }
 }
 
 /// ColourGradient allows you to create custom colour gradients for each
 /// PNG created.
 pub struct ColourGradient {
-  pub colours: Vec<RGBAColour>,
-  pub min: f32,
-  pub max: f32,
+    pub colours: Vec<RGBAColour>,
+    pub min: f32,
+    pub max: f32,
 }
 
 impl ColourGradient {
-  pub fn new() -> Self {
-    Self {
-      colours: vec![RGBAColour::new(0, 0, 0, 0),
-        // Purple
-        RGBAColour::new(55, 0, 110, 0),
-        // Blue
-        RGBAColour::new(0, 0, 180, 0),
-        // Cyan
-        RGBAColour::new(0, 255, 255, 0),
-        // Green
-        RGBAColour::new(0, 255, 0, 0),
-        // Green Yellow
-        // Yellow
-        RGBAColour::new(255, 255, 0, 0),
-        // Orange
-        RGBAColour::new(230, 160, 0, 0),
-        // Red
-        RGBAColour::new(255, 0, 0, 0)],
-      min: 0.0,
-      max: 1.0,
-    }
-  }
-
-  pub fn get_colour(&self, value: f32) -> RGBAColour {
-    assert!(self.colours.len() > 1);
-
-    if value >= self.max {
-      return self.colours.last().unwrap().clone();
-    }
-    let mut ratio = value / self.max;
-    let width = 1.0 / (self.colours.len() as f32 - 1.0);
-    let mut i = 0;
-
-    // Find the "bin"
-    while ratio > width {
-      ratio -= width;
-      i += 1;
+    pub fn new() -> Self {
+        Self {
+            colours: vec![
+                RGBAColour::new(0, 0, 0, 0),
+                // Purple
+                RGBAColour::new(55, 0, 110, 0),
+                // Blue
+                RGBAColour::new(0, 0, 180, 0),
+                // Cyan
+                RGBAColour::new(0, 255, 255, 0),
+                // Green
+                RGBAColour::new(0, 255, 0, 0),
+                // Green Yellow
+                // Yellow
+                RGBAColour::new(255, 255, 0, 0),
+                // Orange
+                RGBAColour::new(230, 160, 0, 0),
+                // Red
+                RGBAColour::new(255, 0, 0, 0),
+            ],
+            min: 0.0,
+            max: 1.0,
+        }
     }
 
-    ratio *= (self.colours.len() - 1) as f32;
+    pub fn get_colour(&self, value: f32) -> RGBAColour {
+        assert!(self.colours.len() > 1);
 
-    assert!(0.0 <= ratio);
-    assert!(ratio <= 1.0);
-    assert!(i < self.colours.len());
+        if value >= self.max {
+            return self.colours.last().unwrap().clone();
+        }
+        let mut ratio = value / self.max;
+        let width = 1.0 / (self.colours.len() as f32 - 1.0);
+        let mut i = 0;
 
-    let first = self.colours[i].clone();
-    let second = self.colours[i + 1].clone();
+        // Find the "bin"
+        while ratio > width {
+            ratio -= width;
+            i += 1;
+        }
 
-    RGBAColour {
-      r: self.interpolate(first.r, second.r, ratio),
-      g: self.interpolate(first.g, second.g, ratio),
-      b: self.interpolate(first.b, second.b, ratio),
-      a: 255,
+        ratio *= (self.colours.len() - 1) as f32;
+
+        assert!(0.0 <= ratio);
+        assert!(ratio <= 1.0);
+        assert!(i < self.colours.len());
+
+        let first = self.colours[i].clone();
+        let second = self.colours[i + 1].clone();
+
+        RGBAColour {
+            r: self.interpolate(first.r, second.r, ratio),
+            g: self.interpolate(first.g, second.g, ratio),
+            b: self.interpolate(first.b, second.b, ratio),
+            a: 255,
+        }
     }
-  }
 
-  fn interpolate(&self, start: u8, finish: u8, ratio: f32) -> u8 {
-    ((f32::from(finish) - f32::from(start)) * ratio + f32::from(start)).round() as u8
-  }
+    fn interpolate(&self, start: u8, finish: u8, ratio: f32) -> u8 {
+        ((f32::from(finish) - f32::from(start)) * ratio + f32::from(start)).round() as u8
+    }
 
-  pub fn set_max(&mut self, max: f32) {
-    self.max = max
-  }
+    pub fn set_max(&mut self, max: f32) {
+        self.max = max
+    }
 
-  pub fn set_min(&mut self, min: f32) {
-    self.min = min
-  }
+    pub fn set_min(&mut self, min: f32) {
+        self.min = min
+    }
 }

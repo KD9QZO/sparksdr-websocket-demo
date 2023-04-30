@@ -1,9 +1,9 @@
-use web_sys::{AudioContext, GainNode};
-use yew::services::{ConsoleService};
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::{spawn_local};
+use wasm_bindgen_futures::spawn_local;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{AudioBuffer};
+use web_sys::AudioBuffer;
+use web_sys::{AudioContext, GainNode};
+use yew::services::ConsoleService;
 
 pub struct AudioProvider {
     // audio playback
@@ -70,7 +70,8 @@ impl AudioProvider {
                 let start_time = self.audio_start_time;
 
                 spawn_local(async move {
-                    let future = JsFuture::from(audio_ctx.decode_audio_data(&data.slice(5)).unwrap());
+                    let future =
+                        JsFuture::from(audio_ctx.decode_audio_data(&data.slice(5)).unwrap());
                     match future.await {
                         Ok(value) => {
                             if let Ok(decoded) = value.dyn_into::<AudioBuffer>() {
@@ -78,19 +79,23 @@ impl AudioProvider {
                                 source.set_buffer(Some(&decoded));
                                 source.connect_with_audio_node(&gain).unwrap();
                                 source.set_loop(false);
-                                let play_time = start_time as f64 + (audio_pos as f64 * 512.0 / 48000.0) + 0.1;
+                                let play_time =
+                                    start_time as f64 + (audio_pos as f64 * 512.0 / 48000.0) + 0.1;
                                 source.start_with_when(play_time).unwrap();
                             } else {
                                 ConsoleService::error("decoded audio not a valid audio buffer");
                             }
-                        },
+                        }
                         Err(err) => {
-                            ConsoleService::error(&format!("unable to decode audio data: {:?}", err));
+                            ConsoleService::error(&format!(
+                                "unable to decode audio data: {:?}",
+                                err
+                            ));
                         }
                     }
                 });
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 
@@ -126,6 +131,4 @@ impl AudioProvider {
             }
         }
     }
-
-
 }

@@ -2,24 +2,24 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
+use js_sys::DataView;
 use wasm_bindgen::prelude::*;
+use web_sys::HtmlCanvasElement;
+use yew::services::ConsoleService;
 use yew::{html, Component, ComponentLink, Html, ShouldRender};
-use yew::services::{ConsoleService};
-use yew_router::{Switch};
-use web_sys::{HtmlCanvasElement};
-use js_sys::{DataView};
+use yew_router::Switch;
 
 use ham_rs::lotw::LoTWStatus;
-use sparkplug::{Command,CommandResponse};
+use sparkplug::{Command, CommandResponse};
 
-mod model;
-mod color;
-mod spot;
 mod audio;
+mod color;
+mod model;
 mod spectrum;
+mod spot;
 
-use model::{Model,Msg,AppRoute};
-use spot::{SpotFilter};
+use model::{AppRoute, Model, Msg};
+use spot::SpotFilter;
 
 impl Component for Model {
     type Message = Msg;
@@ -33,40 +33,46 @@ impl Component for Model {
                 self.send_command(Command::GetRadios);
                 self.send_command(Command::GetVersion);
                 // Also subscribe to spots
-                self.send_command(Command::SubscribeToSpots{ enable: true });
+                self.send_command(Command::SubscribeToSpots { enable: true });
 
                 // fetch the lotw users file
                 if !self.spots.has_lotw_users() {
                     self.spots.fetch_lotw_users(&self.link);
                 }
                 false
-            },
+            }
             Msg::CommandResponse(Ok(msg)) => {
                 match msg {
                     // getReceiversResponse: update our receiver list
                     CommandResponse::Receivers { receivers } => {
                         self.set_receivers(receivers);
-                    },
+                    }
                     //  update our radio list
                     CommandResponse::Radios { radios } => {
                         self.set_radios(radios);
-                    },
+                    }
                     // getVersionResponse: update our version info
                     CommandResponse::Version(version) => {
                         self.set_version(version);
-                    },
+                    }
                     // spotResponse: new incoming spots
                     CommandResponse::Spots { spots } => {
                         let cq_only = self.spots.cq_only_spot_filter_enabled();
                         for spot in spots {
                             if (cq_only && spot.is_cq()) || !cq_only {
-                                let current_rx_pass =
-                                    match self.default_receiver() {
-                                        Some(receiver) if self.spots.current_receiver_spot_filter_enabled() && receiver.has_spots() => {
-                                            if spot.current_rx(&receiver) { true } else { false }
-                                        },
-                                        _ => true,
-                                    };
+                                let current_rx_pass = match self.default_receiver() {
+                                    Some(receiver)
+                                        if self.spots.current_receiver_spot_filter_enabled()
+                                            && receiver.has_spots() =>
+                                    {
+                                        if spot.current_rx(&receiver) {
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    _ => true,
+                                };
 
                                 if current_rx_pass {
                                     self.spots.add_spot(&self.link, spot, &self.import);
@@ -74,194 +80,212 @@ impl Component for Model {
                             }
                         }
                         self.spots.trim_spots(100);
-                    },
+                    }
                     // ReceiverResponse: receiver updates (mode/frequency)
-                    CommandResponse::ReceiverResponse{ id: receiver_id, frequency, mode, filter_low, filter_high } => {
+                    CommandResponse::ReceiverResponse {
+                        id: receiver_id,
+                        frequency,
+                        mode,
+                        filter_low,
+                        filter_high,
+                    } => {
                         self.update_receiver(receiver_id, mode, frequency, filter_low, filter_high);
                     }
                 }
                 true
-            },
+            }
             Msg::EnableAudio => {
                 match self.audio.receiving_audio() {
                     Some(_) => {
                         self.unsubscribe_to_audio();
-                    },
+                    }
                     None => {
                         self.subscribe_to_audio();
                     }
                 }
                 true
-            },
+            }
             Msg::ReceivedAudio(data) => {
                 let view = DataView::new(&data, 0, data.byte_length() as usize);
                 let data_type = view.get_uint8(0);
                 let receiver_id = view.get_int32(1);
 
-                match (data_type, self.audio.receiving_audio(), self.spectrum.receiving_spectrum()) {
+                match (
+                    data_type,
+                    self.audio.receiving_audio(),
+                    self.spectrum.receiving_spectrum(),
+                ) {
                     (1, Some(_), _) => {
                         self.audio.import_audio_data(data);
-                    },
-                    (2, _, Some(subscribed_spectrum)) => {// if subscribed_spectrum == (receiver_id as u32) => {
+                    }
+                    (2, _, Some(subscribed_spectrum)) => {
+                        // if subscribed_spectrum == (receiver_id as u32) => {
                         match self.default_receiver() {
                             Some(receiver) => {
                                 let freq_start = view.get_float64_endian(5, true).floor();
                                 let freq_stop = view.get_float64_endian(13, true).floor();
-                                self.spectrum.import_spectrum_data(data, freq_start, freq_stop);
-                            },
-                            None => () // should never happen
+                                self.spectrum
+                                    .import_spectrum_data(data, freq_start, freq_stop);
+                            }
+                            None => (), // should never happen
                         }
-                    },
+                    }
                     (2, _, Some(_)) => (),
                     (_, None, None) => {
-                        ConsoleService::error("receiving binary data but not subscribed to anything");
-                    },
+                        ConsoleService::error(
+                            "receiving binary data but not subscribed to anything",
+                        );
+                    }
                     (dt, _, _) => {
                         ConsoleService::error(&format!("unsupported data type: {}", dt));
                     }
                 }
                 false
-            },
+            }
             Msg::MuteUnmute => {
                 self.audio.toggle_mute();
                 true
-            },
+            }
             Msg::CommandResponse(Err(err)) => {
                 ConsoleService::error(&format!("command response error: {}", err));
                 false
-            },
+            }
             Msg::CallsignInfoReady(Ok(call)) => {
                 // FIXME: json serialization issue
                 let mut call = call;
                 match call.lotw() {
                     LoTWStatus::Unknown => {
                         call.set_lotw(LoTWStatus::Unregistered);
-                    },
-                    _ => ()
+                    }
+                    _ => (),
                 }
 
                 self.spots.cache_callsign_info(call, &self.import);
                 true
-            },
+            }
             Msg::CallsignInfoReady(Err(err)) => {
                 ConsoleService::error(&format!("callsign info error: {}", err));
                 false
-            },
+            }
             Msg::ClearSpots => {
                 self.spots.clear_spots();
                 true
-            },
+            }
             Msg::SetDefaultReceiver(receiver_id) => {
                 self.set_default_receiver(Some(receiver_id));
                 true
-            },
+            }
             Msg::AddReceiver(radio_id) => {
                 self.send_command(Command::AddReceiver { id: radio_id });
                 false
-            },
+            }
             Msg::RemoveReceiver(receiver_id) => {
-                self.send_command(Command::RemoveReceiver{ id: receiver_id });
+                self.send_command(Command::RemoveReceiver { id: receiver_id });
                 false
-            },
+            }
             Msg::TogglePower(radio_id) => {
                 match self.get_radio_power_state(radio_id) {
                     Some(state) => {
-                        self.send_command(Command::SetRunning{ id: radio_id, running: !state });
-                    },
+                        self.send_command(Command::SetRunning {
+                            id: radio_id,
+                            running: !state,
+                        });
+                    }
                     None => {
-                        ConsoleService::error(&format!("TogglePower: No radio found: {}", radio_id));
+                        ConsoleService::error(&format!(
+                            "TogglePower: No radio found: {}",
+                            radio_id
+                        ));
                     }
                 }
                 false
-            },
+            }
             Msg::ToggleReceiverList => {
                 self.toggle_receiver_list();
                 true
-            },
+            }
             Msg::ModeChanged(receiver_id, mode) => {
                 self.change_receiver_mode(receiver_id, mode);
                 true
-            },
+            }
             Msg::FrequencyDown(receiver_id, digit) => {
                 self.frequency_down(receiver_id, digit);
                 true
-            },
+            }
             Msg::FrequencyUp(receiver_id, digit) => {
                 self.frequency_up(receiver_id, digit);
                 true
-            },
+            }
             Msg::Connect => {
                 let addr = self.ws_location.to_string();
                 ConsoleService::log(&format!("Connecting to {}", addr));
                 self.connect(&addr);
                 true
-            },
+            }
             Msg::UpdateWebsocketAddress(address) => {
                 self.ws_location = address;
                 true
-            },
+            }
             Msg::Disconnected => {
                 self.disconnect();
                 ConsoleService::error("Disconnected");
                 true
-            },
+            }
             Msg::SetGain(gain) => {
                 self.audio.set_gain(gain);
                 true
-            },
+            }
             Msg::RouteChanged(route) => {
                 self.hide_receiver_list();
                 self.route = route;
                 true
-            },
+            }
             Msg::ChangeRoute(route) => {
                 self.hide_receiver_list();
                 // This might be derived in the future
                 self.route = route.into();
                 self.route_service.set_route(&self.route.route, ());
                 true
-            },
+            }
             Msg::CancelImport => {
                 self.clear_adif_data();
                 true
-            },
-            Msg::ConfirmImport => {
-                true
-            },
+            }
+            Msg::ConfirmImport => true,
             Msg::Loaded(data) => {
                 self.load_adif_data(data);
                 true
-            },
+            }
             Msg::Files(files, _) => {
                 for file in files.into_iter() {
                     self.read_file(file);
                 }
                 true
-            },
+            }
             Msg::LotwUsers(users) => {
                 ConsoleService::log("lotw users imported");
                 self.spots.import_lotw_users(users);
                 true
-            },
+            }
             Msg::StatesOverlay(geo_json) => {
                 ConsoleService::log("states overlay imported");
                 self.spots.import_states_overlay(geo_json);
                 false
-            },
+            }
             Msg::ToggleCQSpotFilter => {
                 match self.spots.cq_only_spot_filter_enabled() {
                     true => self.spots.remove_filter(SpotFilter::CQOnly).unwrap(),
                     false => self.spots.add_filter(SpotFilter::CQOnly),
                 }
                 true
-            },
+            }
             Msg::ToggleCountrySpotFilter => {
                 match self.spots.country_spot_filter_enabled() {
                     true => self.spots.remove_filter(SpotFilter::NewCountry).unwrap(),
                     false => self.spots.add_filter(SpotFilter::NewCountry),
                 }
                 true
-            },
+            }
             Msg::ToggleStateSpotFilter => {
                 match self.spots.state_spot_filter_enabled() {
                     true => self.spots.remove_filter(SpotFilter::NewState).unwrap(),
@@ -271,21 +295,24 @@ impl Component for Model {
                         match self.spots.has_states_overlay() {
                             false => {
                                 self.spots.fetch_states_overlay(&self.link);
-                            },
-                            true => ()
+                            }
+                            true => (),
                         }
-                    },
+                    }
                 }
                 self.spots.update_states_overlay_js();
                 true
-            },
+            }
             Msg::ToggleCurrentReceiverSpotFilter => {
                 match self.spots.current_receiver_spot_filter_enabled() {
-                    true => self.spots.remove_filter(SpotFilter::CurrentReceiver).unwrap(),
+                    true => self
+                        .spots
+                        .remove_filter(SpotFilter::CurrentReceiver)
+                        .unwrap(),
                     false => self.spots.add_filter(SpotFilter::CurrentReceiver),
                 }
                 true
-            },
+            }
             Msg::ToggleLoTWSpotFilter => {
                 match self.spots.lotw_spot_filter_enabled() {
                     true => self.spots.remove_filter(SpotFilter::LoTW).unwrap(),
@@ -293,7 +320,7 @@ impl Component for Model {
                 }
                 true
             }
-            Msg::None => { false }
+            Msg::None => false,
         }
     }
 
@@ -308,10 +335,18 @@ impl Component for Model {
     }
 
     fn rendered(&mut self, first_render: bool) {
-        let canvas = self.spectrum.canvas_node_ref.cast::<HtmlCanvasElement>().unwrap();
+        let canvas = self
+            .spectrum
+            .canvas_node_ref
+            .cast::<HtmlCanvasElement>()
+            .unwrap();
         self.spectrum.canvas = Some(canvas);
 
-        let tmp_canvas = self.spectrum.tmp_canvas_node_ref.cast::<HtmlCanvasElement>().unwrap();
+        let tmp_canvas = self
+            .spectrum
+            .tmp_canvas_node_ref
+            .cast::<HtmlCanvasElement>()
+            .unwrap();
         self.spectrum.tmp_canvas = Some(tmp_canvas);
 
         if first_render {
@@ -321,11 +356,18 @@ impl Component for Model {
     }
 
     fn view(&self) -> Html {
-        let (is_index, spectrum_style, map_style) =
-            match AppRoute::switch(self.route.clone()) {
-                Some(AppRoute::Index) | None => (true, "position:relative;margin-top:10px", "height:0px;overflow:hidden;"),
-                _ => (false, "height:110px;overflow:hidden;position:relative;margin-top:10px", ""),
-            };
+        let (is_index, spectrum_style, map_style) = match AppRoute::switch(self.route.clone()) {
+            Some(AppRoute::Index) | None => (
+                true,
+                "position:relative;margin-top:10px",
+                "height:0px;overflow:hidden;",
+            ),
+            _ => (
+                false,
+                "height:110px;overflow:hidden;position:relative;margin-top:10px",
+                "",
+            ),
+        };
 
         match self.is_connected() {
             false => self.disconnected_view(),

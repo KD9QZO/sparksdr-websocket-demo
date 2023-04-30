@@ -1,25 +1,25 @@
 use anyhow::Error;
-use yew::prelude::*;
-use yew::services::{ConsoleService};
-use yew::{html, ComponentLink, Html};
-use yew_router::{route::Route, service::RouteService};
-use yew_router::{Switch};
-use yew::format::{Json};
-use yew::services::reader::{File, FileData, ReaderService, ReaderTask};
-use yew::services::websocket::{WebSocketStatus};
-use yew::services::storage::{Area, StorageService};
-use web_sys::{WebSocket,BinaryType,MessageEvent};
 use std::str;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::{BinaryType, MessageEvent, WebSocket};
+use yew::format::Json;
+use yew::prelude::*;
+use yew::services::reader::{File, FileData, ReaderService, ReaderTask};
+use yew::services::storage::{Area, StorageService};
+use yew::services::websocket::WebSocketStatus;
+use yew::services::ConsoleService;
+use yew::{html, ComponentLink, Html};
+use yew_router::Switch;
+use yew_router::{route::Route, service::RouteService};
 
-use ham_rs::{Call,Country,CountryInfo,LogEntry,Mode};
 use ham_rs::lotw::LoTWStatus;
+use ham_rs::{Call, Country, CountryInfo, LogEntry, Mode};
 
-use sparkplug::{Command,CommandResponse,Receiver,Radio,Version,RECEIVER_MODES,Spot};
-use crate::spot::{SpotDB};
-use crate::audio::{AudioProvider};
-use crate::spectrum::{SpectrumProvider};
+use crate::audio::AudioProvider;
+use crate::spectrum::SpectrumProvider;
+use crate::spot::SpotDB;
+use sparkplug::{Command, CommandResponse, Radio, Receiver, Spot, Version, RECEIVER_MODES};
 
 const LOGBOOK_KEY: &str = "radio.logs";
 
@@ -56,7 +56,7 @@ pub struct Model {
 }
 
 // Currently this is unused as there is only one route: /
-#[derive(Clone,Switch, Debug)]
+#[derive(Clone, Switch, Debug)]
 pub enum AppRoute {
     #[to = "/map"]
     Map,
@@ -69,7 +69,7 @@ pub enum AppRoute {
 // BinaryMsg would be for future support for audio in/out
 pub enum WebsocketMsgType {
     BinaryMsg(js_sys::ArrayBuffer),
-    TextMsg(String)
+    TextMsg(String),
 }
 
 type Chunks = bool;
@@ -94,7 +94,7 @@ pub enum Msg {
     // being sent to SparkSDR
 
     // Request change to receiver frequency
-    FrequencyUp(u32, i32), // digit 0 - 8 
+    FrequencyUp(u32, i32),   // digit 0 - 8
     FrequencyDown(u32, i32), // digit 0 - 8
     // Request change to receiver mode
     ModeChanged(u32, Mode),
@@ -112,7 +112,6 @@ pub enum Msg {
     EnableAudio,
 
     // Local only messages
-
     ToggleReceiverList,
     None,
     // Log file import (adif file format)
@@ -128,7 +127,7 @@ pub enum Msg {
     // Spot messages
 
     // Response to our callsign info request
-    CallsignInfoReady(Result<Call,Error>),
+    CallsignInfoReady(Result<Call, Error>),
     // Response to our LoTW users request
     LotwUsers(String),
     // States geoJson data
@@ -149,18 +148,17 @@ impl Model {
         route_service.register_callback(callback);
 
         let storage = StorageService::new(Area::Local).expect("storage was disabled by the user");
-        let entries = 
-            match storage.restore(LOGBOOK_KEY) {
-                Json(Ok(entries)) => {
-                    ConsoleService::log("found log files");
-                    entries
-                },
-                Json(Err(err)) => {
-                    ConsoleService::error(&format!("log import error: {}", err));
-                    None
-                },
-                _ => None
-            };
+        let entries = match storage.restore(LOGBOOK_KEY) {
+            Json(Ok(entries)) => {
+                ConsoleService::log("found log files");
+                entries
+            }
+            Json(Err(err)) => {
+                ConsoleService::error(&format!("log import error: {}", err));
+                None
+            }
+            _ => None,
+        };
 
         let spot_db = SpotDB::new();
         spot_db.update_states_overlay_js();
@@ -190,22 +188,36 @@ impl Model {
     }
 
     fn update_state_map_overlay(&self) {
-        let (worked_states,lotw_states) =
-            match &self.import {
-                Some(import) => {
-                    let worked_states : Vec<String> = import.iter().filter(|i| i.call.country() == Ok(Country::UnitedStates) && i.call.state().is_some()).map(|i| i.call.state().unwrap() ).collect();
-                    let lotw_states : Vec<String> = import.iter().filter(|i| i.call.country() == Ok(Country::UnitedStates) && i.call.state().is_some() && i.lotw_qsl_rcvd).map(|i| i.call.state().unwrap() ).collect();
-                    (worked_states,lotw_states)
-                },
-                None => {
-                    (Vec::new(),Vec::new())
-                }
-            };
+        let (worked_states, lotw_states) = match &self.import {
+            Some(import) => {
+                let worked_states: Vec<String> = import
+                    .iter()
+                    .filter(|i| {
+                        i.call.country() == Ok(Country::UnitedStates) && i.call.state().is_some()
+                    })
+                    .map(|i| i.call.state().unwrap())
+                    .collect();
+                let lotw_states: Vec<String> = import
+                    .iter()
+                    .filter(|i| {
+                        i.call.country() == Ok(Country::UnitedStates)
+                            && i.call.state().is_some()
+                            && i.lotw_qsl_rcvd
+                    })
+                    .map(|i| i.call.state().unwrap())
+                    .collect();
+                (worked_states, lotw_states)
+            }
+            None => (Vec::new(), Vec::new()),
+        };
 
         let worked_states_json = serde_json::to_string(&worked_states).unwrap();
         let lotw_states_json = serde_json::to_string(&lotw_states).unwrap();
 
-        let js = format!("workedStates = {};lotwConfirmed = {};updateStateOverlay();", worked_states_json, lotw_states_json);
+        let js = format!(
+            "workedStates = {};lotwConfirmed = {};updateStateOverlay();",
+            worked_states_json, lotw_states_json
+        );
         ConsoleService::debug(&format!("js: {}", js));
         js_sys::eval(&js).unwrap();
     }
@@ -216,8 +228,8 @@ impl Model {
         match self.default_receiver {
             None => {
                 self.set_default_receiver(Some(self.receivers[0].id));
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 
@@ -229,8 +241,8 @@ impl Model {
                 } else {
                     None
                 }
-            },
-            None => None
+            }
+            None => None,
         }
     }
 
@@ -245,7 +257,14 @@ impl Model {
     }
 
     // CommandResponse: ReceiverResponse
-    pub fn update_receiver(&mut self, receiver_id: u32, mode: Mode, frequency: f32, filter_low: f32, filter_high: f32) {
+    pub fn update_receiver(
+        &mut self,
+        receiver_id: u32,
+        mode: Mode,
+        frequency: f32,
+        filter_low: f32,
+        filter_high: f32,
+    ) {
         if let Some(index) = self.receivers.iter().position(|i| i.id == receiver_id) {
             self.receivers[index].frequency = frequency;
             self.receivers[index].mode = mode;
@@ -253,50 +272,104 @@ impl Model {
             self.receivers[index].filter_high = filter_high;
             let receiver = self.receivers[index].clone();
 
-            let js = &format!("initWaterfallNav(\"{}\", {}, {}, {});", receiver.mode.mode(), receiver.frequency, receiver.filter_high, receiver.filter_low);
+            let js = &format!(
+                "initWaterfallNav(\"{}\", {}, {}, {});",
+                receiver.mode.mode(),
+                receiver.frequency,
+                receiver.filter_high,
+                receiver.filter_low
+            );
             ConsoleService::log(&format!("js: {}", js));
             js_sys::eval(&js).unwrap();
         } else {
-            ConsoleService::error(&format!("Attempted to update a receiver that does not exist: {}", receiver_id));
+            ConsoleService::error(&format!(
+                "Attempted to update a receiver that does not exist: {}",
+                receiver_id
+            ));
         }
     }
 
     pub fn change_receiver_mode(&mut self, receiver_id: u32, mode: Mode) {
         if let Some(index) = self.receivers.iter().position(|i| i.id == receiver_id) {
             self.receivers[index].mode = mode.clone();
-            self.send_command(Command::SetMode { mode: mode.clone(), id: receiver_id });
+            self.send_command(Command::SetMode {
+                mode: mode.clone(),
+                id: receiver_id,
+            });
         }
     }
 
     pub fn frequency_up(&mut self, receiver_id: u32, digit: i32) {
         if let Some(index) = self.receivers.iter().position(|i| i.id == receiver_id) {
-            if digit == 0 { self.receivers[index].frequency += 100000000.0 }
-            if digit == 1 { self.receivers[index].frequency += 10000000.0 }
-            if digit == 2 { self.receivers[index].frequency += 1000000.0 }
-            if digit == 3 { self.receivers[index].frequency += 100000.0 }
-            if digit == 4 { self.receivers[index].frequency += 10000.0 }
-            if digit == 5 { self.receivers[index].frequency += 1000.0 }
-            if digit == 6 { self.receivers[index].frequency += 100.0 }
-            if digit == 7 { self.receivers[index].frequency += 10.0 }
-            if digit == 8 { self.receivers[index].frequency += 1.0 }
+            if digit == 0 {
+                self.receivers[index].frequency += 100000000.0
+            }
+            if digit == 1 {
+                self.receivers[index].frequency += 10000000.0
+            }
+            if digit == 2 {
+                self.receivers[index].frequency += 1000000.0
+            }
+            if digit == 3 {
+                self.receivers[index].frequency += 100000.0
+            }
+            if digit == 4 {
+                self.receivers[index].frequency += 10000.0
+            }
+            if digit == 5 {
+                self.receivers[index].frequency += 1000.0
+            }
+            if digit == 6 {
+                self.receivers[index].frequency += 100.0
+            }
+            if digit == 7 {
+                self.receivers[index].frequency += 10.0
+            }
+            if digit == 8 {
+                self.receivers[index].frequency += 1.0
+            }
 
-            self.send_command(Command::SetFrequency { frequency: (self.receivers[index].frequency as i32).to_string(), id: receiver_id });
+            self.send_command(Command::SetFrequency {
+                frequency: (self.receivers[index].frequency as i32).to_string(),
+                id: receiver_id,
+            });
         }
     }
 
     pub fn frequency_down(&mut self, receiver_id: u32, digit: i32) {
         if let Some(index) = self.receivers.iter().position(|i| i.id == receiver_id) {
-            if digit == 0 { self.receivers[index].frequency -= 100000000.0 }
-            if digit == 1 { self.receivers[index].frequency -= 10000000.0 }
-            if digit == 2 { self.receivers[index].frequency -= 1000000.0 }
-            if digit == 3 { self.receivers[index].frequency -= 100000.0 }
-            if digit == 4 { self.receivers[index].frequency -= 10000.0 }
-            if digit == 5 { self.receivers[index].frequency -= 1000.0 }
-            if digit == 6 { self.receivers[index].frequency -= 100.0 }
-            if digit == 7 { self.receivers[index].frequency -= 10.0 }
-            if digit == 8 { self.receivers[index].frequency -= 1.0 }
+            if digit == 0 {
+                self.receivers[index].frequency -= 100000000.0
+            }
+            if digit == 1 {
+                self.receivers[index].frequency -= 10000000.0
+            }
+            if digit == 2 {
+                self.receivers[index].frequency -= 1000000.0
+            }
+            if digit == 3 {
+                self.receivers[index].frequency -= 100000.0
+            }
+            if digit == 4 {
+                self.receivers[index].frequency -= 10000.0
+            }
+            if digit == 5 {
+                self.receivers[index].frequency -= 1000.0
+            }
+            if digit == 6 {
+                self.receivers[index].frequency -= 100.0
+            }
+            if digit == 7 {
+                self.receivers[index].frequency -= 10.0
+            }
+            if digit == 8 {
+                self.receivers[index].frequency -= 1.0
+            }
 
-            self.send_command(Command::SetFrequency { frequency: (self.receivers[index].frequency as i32).to_string(), id: receiver_id });
+            self.send_command(Command::SetFrequency {
+                frequency: (self.receivers[index].frequency as i32).to_string(),
+                id: receiver_id,
+            });
         }
     }
 
@@ -305,22 +378,16 @@ impl Model {
     // 2) Binary: Binary encoded audio data
     //
     // Both channels are bi-directional (e.g. transmit using binary encoded audio)
-    // 
+    //
     pub fn connect(&mut self, ws: &str) {
         let ws = WebSocket::new(ws).unwrap();
         ws.set_binary_type(BinaryType::Arraybuffer);
 
-		let cbnot = self.link.callback(|input| {
-			match input {
-				WebSocketStatus::Closed | WebSocketStatus::Error => {
-					Msg::Disconnected
-                },
-                WebSocketStatus::Opened => {
-                    Msg::Connected
-                }
-			}
+        let cbnot = self.link.callback(|input| match input {
+            WebSocketStatus::Closed | WebSocketStatus::Error => Msg::Disconnected,
+            WebSocketStatus::Opened => Msg::Connected,
         });
-        
+
         let notify = cbnot.clone();
         let onopen_callback = Closure::wrap(Box::new(move |_| {
             ConsoleService::log("rig control: connection opened");
@@ -345,15 +412,11 @@ impl Model {
         ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
         onclose_callback.forget();
 
-        let cbout = self.link.callback(|data| {
-            match data {
-                WebsocketMsgType::BinaryMsg(binary) => {
-                    Msg::ReceivedAudio(binary)
-                },
-                WebsocketMsgType::TextMsg(text) => {
-                    let Json(data): Json<Result<CommandResponse, _>> = Json::from(Ok(text));
-                    Msg::CommandResponse(data)
-                }
+        let cbout = self.link.callback(|data| match data {
+            WebsocketMsgType::BinaryMsg(binary) => Msg::ReceivedAudio(binary),
+            WebsocketMsgType::TextMsg(text) => {
+                let Json(data): Json<Result<CommandResponse, _>> = Json::from(Ok(text));
+                Msg::CommandResponse(data)
             }
         });
 
@@ -386,7 +449,7 @@ impl Model {
     pub fn is_connected(&self) -> bool {
         match self.wss {
             Some(_) => true,
-            None => false
+            None => false,
         }
     }
 
@@ -403,42 +466,53 @@ impl Model {
     pub fn subscribe_to_audio(&mut self) {
         match self.audio.receiving_audio() {
             Some(previous_audio_channel) => {
-                self.send_command(Command::SubscribeToAudio{ rx_id: previous_audio_channel, enable: false });
-            },
-            None => ()
+                self.send_command(Command::SubscribeToAudio {
+                    rx_id: previous_audio_channel,
+                    enable: false,
+                });
+            }
+            None => (),
         }
-        let rx_id =
-            match self.default_receiver() {
-                Some(receiver) => {
-                    self.send_command(Command::SubscribeToAudio{ rx_id: receiver.id, enable: true });
-                    ConsoleService::log(&format!("subscribed to audio channel: {}", receiver.id));
-                    Some(receiver.id)
-                },
-                None => None,
-            };
+        let rx_id = match self.default_receiver() {
+            Some(receiver) => {
+                self.send_command(Command::SubscribeToAudio {
+                    rx_id: receiver.id,
+                    enable: true,
+                });
+                ConsoleService::log(&format!("subscribed to audio channel: {}", receiver.id));
+                Some(receiver.id)
+            }
+            None => None,
+        };
         self.audio.set_subscribed(rx_id);
     }
 
     pub fn unsubscribe_to_audio(&mut self) {
         match self.audio.receiving_audio() {
             Some(previous_audio_channel) => {
-                self.send_command(Command::SubscribeToAudio{ rx_id: previous_audio_channel, enable: false });
+                self.send_command(Command::SubscribeToAudio {
+                    rx_id: previous_audio_channel,
+                    enable: false,
+                });
                 ConsoleService::log("unsubscribed to audio");
-            },
-            None => ()
+            }
+            None => (),
         }
         self.audio.set_subscribed(None);
     }
 
     pub fn set_default_receiver(&mut self, receiver: Option<u32>) {
-        if self.default_receiver == receiver { /* do nothing */ }
-        else {
+        if self.default_receiver == receiver { /* do nothing */
+        } else {
             // unsubscribe to old spectrum data
             match self.spectrum.receiving_spectrum() {
                 Some(previous_subscription) => {
-                    self.send_command(Command::SubscribeToSpectrum{ rx_id: previous_subscription, enable: false });
-                },
-                None => ()
+                    self.send_command(Command::SubscribeToSpectrum {
+                        rx_id: previous_subscription,
+                        enable: false,
+                    });
+                }
+                None => (),
             }
 
             // subscribe to new spectrum data
@@ -446,10 +520,19 @@ impl Model {
                 Some(receiver_id) => {
                     if let Some(index) = self.receivers.iter().position(|i| i.id == receiver_id) {
                         let receiver = self.receivers[index].clone();
-                        self.send_command(Command::SubscribeToSpectrum{ rx_id: receiver_id, enable: true });
+                        self.send_command(Command::SubscribeToSpectrum {
+                            rx_id: receiver_id,
+                            enable: true,
+                        });
                         self.spectrum.set_subscribed(Some(receiver_id));
 
-                        let js = format!("initWaterfallNav(\"{}\", {}, {}, {});", receiver.mode.mode(), receiver.frequency, receiver.filter_high, receiver.filter_low);
+                        let js = format!(
+                            "initWaterfallNav(\"{}\", {}, {}, {});",
+                            receiver.mode.mode(),
+                            receiver.frequency,
+                            receiver.filter_high,
+                            receiver.filter_low
+                        );
                         ConsoleService::log(&format!("js: {}", js));
                         js_sys::eval(&js).unwrap();
 
@@ -460,13 +543,16 @@ impl Model {
                         match self.audio.receiving_audio() {
                             Some(_) => {
                                 self.subscribe_to_audio();
-                            },
-                            None => ()
+                            }
+                            None => (),
                         }
                     } else {
-                        ConsoleService::error(&format!("Attempted to set default receiver with invalid receiver id: {}", receiver_id));
+                        ConsoleService::error(&format!(
+                            "Attempted to set default receiver with invalid receiver id: {}",
+                            receiver_id
+                        ));
                     }
-                },
+                }
                 None => {
                     self.default_receiver = None;
                     self.unsubscribe_to_audio();
@@ -504,16 +590,19 @@ impl Model {
                     match LogEntry::from_adif_record(&record) {
                         Ok(entry) => {
                             records.push(entry);
-                        },
+                        }
                         Err(e) => {
-                            ConsoleService::error(&format!("failed to import record [{:?}]: {:?}", e, record));
+                            ConsoleService::error(&format!(
+                                "failed to import record [{:?}]: {:?}",
+                                e, record
+                            ));
                         }
                     }
                 }
                 self.import = Some(records);
                 self.storage.store(LOGBOOK_KEY, Json(&self.import));
                 self.update_state_map_overlay();
-            },
+            }
             Err(e) => {
                 ConsoleService::error(&format!("unable to load adif: {}", e));
             }
@@ -563,13 +652,14 @@ impl Model {
     }
 
     pub fn spots_view(&self) -> Html {
-        let table_class =
-            match self.default_receiver() {
-                Some(receiver) if receiver.has_spots() && self.spots.current_receiver_spot_filter_enabled() => {
-                    "table is-narrow is-fullwidth filter-currentrx"
-                },
-                _ => "table is-narrow is-fullwidth",
-            };
+        let table_class = match self.default_receiver() {
+            Some(receiver)
+                if receiver.has_spots() && self.spots.current_receiver_spot_filter_enabled() =>
+            {
+                "table is-narrow is-fullwidth filter-currentrx"
+            }
+            _ => "table is-narrow is-fullwidth",
+        };
 
         html! {
             <>
@@ -611,11 +701,10 @@ impl Model {
     }
 
     pub fn spot_filters_sidebar(&self) -> Html {
-        let default_receiver_has_spots =
-            match self.default_receiver() {
-                Some(receiver) if receiver.has_spots() => true,
-                _ => false,
-            };
+        let default_receiver_has_spots = match self.default_receiver() {
+            Some(receiver) if receiver.has_spots() => true,
+            _ => false,
+        };
 
         html! {
             <div class="receiver-control spot-filters">
@@ -665,7 +754,7 @@ impl Model {
                                 html! {}
                             }
                         }
-                        { if let Some(_) = self.import { 
+                        { if let Some(_) = self.import {
                               html! {
                                 <>
                                 <tr>
@@ -709,15 +798,14 @@ impl Model {
     pub fn version_html(&self) -> Html {
         match &self.version {
             Some(version) => {
-                let host_url =
-                    match version.host.as_str() {
-                        "SparkSDR" => "http://www.ihopper.org/radio/",
-                        _ => "",
-                    };
-                html! { 
-                    <p class="version"><a href=host_url>{ version.host.to_string() }</a>{ format!(" {} [Protocol Version: {}]", version.host_version, version.protocol_version) }</p> 
+                let host_url = match version.host.as_str() {
+                    "SparkSDR" => "http://www.ihopper.org/radio/",
+                    _ => "",
+                };
+                html! {
+                    <p class="version"><a href=host_url>{ version.host.to_string() }</a>{ format!(" {} [Protocol Version: {}]", version.host_version, version.protocol_version) }</p>
                 }
-            },
+            }
             None => html! {},
         }
     }
@@ -760,51 +848,61 @@ impl Model {
     }
 
     fn spot(&self, spot: &Spot) -> Html {
-        let (country_icon, state_class) =
-            match spot.call.country() {
-                Ok(country) => {
-                    let (new_country, new_state) =
-                        match &self.import {
-                            Some(import) => {
-                                let new_country =
-                                    if let Some(_index) = import.iter().position(|i| i.call.country() == Ok(country.clone())) {
-                                        ""
-                                    } else {
-                                        "has-text-success"
-                                    };
-                                let new_state =
-                                    match spot.call.state() {
-                                        Some(state) => {
-                                            if let Some(_index) = import.iter().position(|i| i.call.state() == Some(state.to_string())) {
-                                                ""
-                                            } else {
-                                                "has-text-success"
-                                            }
-                                        },
-                                        _ => "",
-                                    };
-                                (new_country, new_state)
-                            },
-                            None => ("", ""),
+        let (country_icon, state_class) = match spot.call.country() {
+            Ok(country) => {
+                let (new_country, new_state) = match &self.import {
+                    Some(import) => {
+                        let new_country = if let Some(_index) = import
+                            .iter()
+                            .position(|i| i.call.country() == Ok(country.clone()))
+                        {
+                            ""
+                        } else {
+                            "has-text-success"
                         };
-                    (html! { <><i class=format!("flag-icon flag-icon-{}", country.code())></i> <span class=new_country>{ country.name() }</span></> }, new_state)
-                },
-                Err(_) => (html! {}, ""),
-            };
+                        let new_state = match spot.call.state() {
+                            Some(state) => {
+                                if let Some(_index) = import
+                                    .iter()
+                                    .position(|i| i.call.state() == Some(state.to_string()))
+                                {
+                                    ""
+                                } else {
+                                    "has-text-success"
+                                }
+                            }
+                            _ => "",
+                        };
+                        (new_country, new_state)
+                    }
+                    None => ("", ""),
+                };
+                (
+                    html! { <><i class=format!("flag-icon flag-icon-{}", country.code())></i> <span class=new_country>{ country.name() }</span></> },
+                    new_state,
+                )
+            }
+            Err(_) => (html! {}, ""),
+        };
 
-        let (lotw_enabled, uses_lotw) =
-            match spot.call.lotw() {
-                LoTWStatus::LastUpload(_) | LoTWStatus::Registered => (true, html! { <span class="has-text-success">{ "Yes" }</span> }),
-                LoTWStatus::Unregistered => (true, html! { { "No" } }),
-                LoTWStatus::Unknown => (false, html! {})
-            };
+        let (lotw_enabled, uses_lotw) = match spot.call.lotw() {
+            LoTWStatus::LastUpload(_) | LoTWStatus::Registered => (
+                true,
+                html! { <span class="has-text-success">{ "Yes" }</span> },
+            ),
+            LoTWStatus::Unregistered => (true, html! { { "No" } }),
+            LoTWStatus::Unknown => (false, html! {}),
+        };
 
-        let spot_receiver_id =
-            if let Some(index) = self.receivers.iter().position(|i| i.frequency == spot.tuned_frequency && i.mode == spot.mode ) {
-                Some(self.receivers[index].id)
-            } else {
-                None
-            };
+        let spot_receiver_id = if let Some(index) = self
+            .receivers
+            .iter()
+            .position(|i| i.frequency == spot.tuned_frequency && i.mode == spot.mode)
+        {
+            Some(self.receivers[index].id)
+        } else {
+            None
+        };
 
         html! {
             <tr>
@@ -853,96 +951,97 @@ impl Model {
         let tmp = self.decimal_mark(frequency_string);
         let mut inactive = true;
         let receiver_id = receiver.id;
-        let (class_name, is_default) = 
-            if Some(receiver.id) == self.default_receiver {
-                if !self.show_receiver_list {
-                    ("receiver-control selected main-view has-background-light", true)
-                } else {
-                    ("receiver-control selected has-background-light", true)
-                }
+        let (class_name, is_default) = if Some(receiver.id) == self.default_receiver {
+            if !self.show_receiver_list {
+                (
+                    "receiver-control selected main-view has-background-light",
+                    true,
+                )
             } else {
-                ("receiver-control", false)
-            };
-        let mute_unmute_main_class =
-            match self.audio.receiving_audio() {
-                Some(_) => "icon is-small",
-                None => "icon is-small has-text-danger",
-            };
+                ("receiver-control selected has-background-light", true)
+            }
+        } else {
+            ("receiver-control", false)
+        };
+        let mute_unmute_main_class = match self.audio.receiving_audio() {
+            Some(_) => "icon is-small",
+            None => "icon is-small has-text-danger",
+        };
 
         if self.show_receiver_list || is_default {
-        html! {
-            <div class=class_name onclick=self.link.callback(move |_| Msg::SetDefaultReceiver(receiver_id))>
-                <div class="up-controls">
-                    {
-                        for (0..9).map(|digit| {
-                            html! { <><a onclick=self.link.callback(move |_| Msg::FrequencyUp(receiver_id, digit))>{ "0" }</a>{ if digit == 2 || digit == 5 { "," } else { "" } }</> }
-                        })
-                    }
-                </div>
-                <div id="frequency" class="frequency">
-                    {
-                        for tmp.chars().map(|c| {
-                            if ((c != '0' && c != ',' && inactive == true)) {
-                                inactive = false;
-                            }
-                            match c {
-                                ',' => html! { { "," } },
-                                _ if inactive => html! { <span>{ c.to_string() }</span> },
-                                _ => html! { <span class="active">{ c.to_string() }</span> }
-                            }
-                        })
-                    }
-                </div>
-                <div class="down-controls">
-                    {
-                        for (0..9).map(|digit| {
-                            html! { <><a onclick=self.link.callback(move |_| Msg::FrequencyDown(receiver_id, digit))>{ "0" }</a>{ if digit == 2 || digit == 5 { "," } else { "" } }</> }
-                        })
-                    }
-                </div>
-                <div class="mode control" style="margin-top:-0.5em;z-index:50">
-                    {
-                        if self.show_receiver_list {
-                            html! {
-                                <button style="float:right" class="button is-text" onclick=self.link.callback(move |_| Msg::RemoveReceiver(receiver_id))>
-                                    <span class="icon is-small">
-                                    <i class="far fa-trash-alt"></i>
-                                    </span>
-                                </button>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                    { if is_default {
-                            html! {
-                                <button style="float:right" class="button is-text" onclick=self.link.callback(move |_| Msg::EnableAudio )>
-                                    <span class=mute_unmute_main_class>
-                                        <i class="fas fa-volume-up"></i>
-                                    </span>
-                                </button>
-                            }
-                        } else {
-                            html! { }
-                        }
-                    }
-                    <select id="mode" class="select" 
-                        onchange=self.link.callback(move |e:ChangeData| 
-                            match e {
-                                ChangeData::Select(sel) => {
-                                    Msg::ModeChanged(receiver_id, Mode::new(sel.value()))
-                                },
-                                _ => { Msg::None }
-                            } )>
+            html! {
+                <div class=class_name onclick=self.link.callback(move |_| Msg::SetDefaultReceiver(receiver_id))>
+                    <div class="up-controls">
                         {
-                            for RECEIVER_MODES.iter().map(|mode| {
-                                html! { <option selected=if mode == &receiver.mode { true } else { false }>{ mode.mode() }</option> }
+                            for (0..9).map(|digit| {
+                                html! { <><a onclick=self.link.callback(move |_| Msg::FrequencyUp(receiver_id, digit))>{ "0" }</a>{ if digit == 2 || digit == 5 { "," } else { "" } }</> }
                             })
                         }
-                    </select>
+                    </div>
+                    <div id="frequency" class="frequency">
+                        {
+                            for tmp.chars().map(|c| {
+                                if ((c != '0' && c != ',' && inactive == true)) {
+                                    inactive = false;
+                                }
+                                match c {
+                                    ',' => html! { { "," } },
+                                    _ if inactive => html! { <span>{ c.to_string() }</span> },
+                                    _ => html! { <span class="active">{ c.to_string() }</span> }
+                                }
+                            })
+                        }
+                    </div>
+                    <div class="down-controls">
+                        {
+                            for (0..9).map(|digit| {
+                                html! { <><a onclick=self.link.callback(move |_| Msg::FrequencyDown(receiver_id, digit))>{ "0" }</a>{ if digit == 2 || digit == 5 { "," } else { "" } }</> }
+                            })
+                        }
+                    </div>
+                    <div class="mode control" style="margin-top:-0.5em;z-index:50">
+                        {
+                            if self.show_receiver_list {
+                                html! {
+                                    <button style="float:right" class="button is-text" onclick=self.link.callback(move |_| Msg::RemoveReceiver(receiver_id))>
+                                        <span class="icon is-small">
+                                        <i class="far fa-trash-alt"></i>
+                                        </span>
+                                    </button>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                        { if is_default {
+                                html! {
+                                    <button style="float:right" class="button is-text" onclick=self.link.callback(move |_| Msg::EnableAudio )>
+                                        <span class=mute_unmute_main_class>
+                                            <i class="fas fa-volume-up"></i>
+                                        </span>
+                                    </button>
+                                }
+                            } else {
+                                html! { }
+                            }
+                        }
+                        <select id="mode" class="select"
+                            onchange=self.link.callback(move |e:ChangeData|
+                                match e {
+                                    ChangeData::Select(sel) => {
+                                        Msg::ModeChanged(receiver_id, Mode::new(sel.value()))
+                                    },
+                                    _ => { Msg::None }
+                                } )>
+                            {
+                                for RECEIVER_MODES.iter().map(|mode| {
+                                    html! { <option selected=if mode == &receiver.mode { true } else { false }>{ mode.mode() }</option> }
+                                })
+                            }
+                        </select>
+                    </div>
                 </div>
-            </div>
-        }
+            }
         } else {
             html! {}
         }
@@ -950,18 +1049,20 @@ impl Model {
 
     fn decimal_mark(&self, s: String) -> String {
         let bytes: Vec<_> = s.bytes().rev().collect();
-        let chunks: Vec<_> = bytes.chunks(3).map(|chunk| str::from_utf8(chunk).unwrap()).collect();
+        let chunks: Vec<_> = bytes
+            .chunks(3)
+            .map(|chunk| str::from_utf8(chunk).unwrap())
+            .collect();
         let result: Vec<_> = chunks.join(",").bytes().rev().collect();
         String::from_utf8(result).unwrap()
     }
 
     fn radio_navbar_controls(&self, radio: &Radio) -> Html {
         let radio_id = radio.id;
-        let power_class =
-            match radio.running {
-                true => "icon is-small has-text-success",
-                false => "icon is-small",
-            };
+        let power_class = match radio.running {
+            true => "icon is-small has-text-success",
+            false => "icon is-small",
+        };
         let short_name = &radio.name[14..];
         html! {
             <>
@@ -996,13 +1097,12 @@ impl Model {
         } else {
             "fa-chevron-down"
         };
-        let (spot_class, map_class) =
-            match AppRoute::switch(self.route.clone()) {
-                Some(AppRoute::Index) => ("navbar-item is-active", "navbar-item"),
-                Some(AppRoute::Map) => ("navbar-item", "navbar-item is-active"),
-                None => ("navbar-item is-active","navbar-item"),
-            };
-            
+        let (spot_class, map_class) = match AppRoute::switch(self.route.clone()) {
+            Some(AppRoute::Index) => ("navbar-item is-active", "navbar-item"),
+            Some(AppRoute::Map) => ("navbar-item", "navbar-item is-active"),
+            None => ("navbar-item is-active", "navbar-item"),
+        };
+
         html! {
             <nav class="navbar is-light" role="navigation" aria-label="main navigation">
                 <div class="navbar-brand">
